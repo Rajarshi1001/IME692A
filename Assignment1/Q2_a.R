@@ -1,11 +1,7 @@
 library("forecast")
 library("dplyr")
 library("ggplot2")
-library("xts")
-library("zoo")
-library("rugarch")
-
-# data processing
+library("Metrics")
 q2data <- read.csv("q2_dataset.csv")
 print(nrow(q2data))
 # fetching data from 1901 to 1990
@@ -17,87 +13,101 @@ filtered_data1 <- data %>%
 # lines(filtered_data1$NOV)
 filtered_data <- as.matrix(filtered_data1[,])
 filtered_data <- ts(as.vector(t(filtered_data1)), frequency = 1)
-ets_forecasts <- list()
-arima_forecasts <- list()
-garch_forecasts <- list()
-arima_order <- c(1,0,1)
-garch_order <- c(2,2)
 
-
-# function declaration for Arima modeling
-arima_forecasting <- function(){
-  
-  for (month_idx in seq_along(selected_months)){
-    arimamodel <- Arima(filtered_data1[,month_idx], order=arima_order)
-    ugarch_spec <- ugarchspec(variance.model = list(model="sGARCH", garchOrder=garch_order))
-    arima_residuals <- residuals(arimamodel)
-    garch_model <- ugarchfit(data=arima_residuals, spec = ugarch_spec)
-    arima_forecasts[[month_idx]] <- forecast(arimamodel, h=nrow(q2data) - nrow(data))
-    garch_forecasts[[month_idx]] <- ugarchforecast(garch_model, n.ahead=nrow(q2data) - nrow(data))
+adaptive_ets <- function(data, initial_alpha, beta) {
+  n <- length(data)
+  forecasts <- numeric(n)
+  a <- numeric(n)
+  m <- numeric(n)
+  u1 <- numeric(length(data))
+  u2 <- numeric(length(data))
+  alpha <- numeric(n)
+  forecasts[1] <- data[1]
+  a[1] <- 0
+  m[1] <- 0
+  alpha[1] <- initial_alpha
+  for (t in 2:n) {
+    forecasts[t] <- alpha[t-1] * data[t-1] + (1 - alpha[t-1]) * (a[t-1] + m[t-1])
+    a[t] <- beta * (data[t] - forecasts[t]) + (1 - beta) * a[t-1]
+    m[t] <- beta * abs(data[t] - forecasts[t]) + (1 - beta) * m[t-1]
+    alpha[t] <- abs(a[t]/m[t])  # Ensure alpha stays between 0 and 1
+    u1[t] <- ((forecasts[t] - data[t])/data[t-1])^2
+    u2[t] <- ((data[t] - data[t-1])/data[t-1])^2
   }
-  
-  # Combine ARIMA and GARCH forecasts
-  combined_forecasts <- lapply(seq_along(selected_months), function(month_idx) {
-    arima_mean <- arima_forecasts[[month_idx]]$mean
-    garch_volatility <- sigma(garch_forecasts[[month_idx]])
-    combined_forecast <- arima_mean + rnorm(n=length(arima_mean), mean = 0.5, sd = 6)
-    data.frame(Year = seq(1991, 2011), Forecast = combined_forecast)
-  })
-  combined_forecasts[[1]]
-  
-  par(mfrow = c(2,2))
-
-  for (month_idx in seq_along(selected_months)) {
-    arima_rmse <- list()
-    original_data <- q2data[,selected_months[month_idx]]
-    forecast_data <- combined_forecasts[[month_idx]]$Forecast
-    diff <- (q2data[91:111, selected_months[month_idx]] - forecast_data)^2
-    rmse_month <- sqrt(mean(diff, na.rm = TRUE))
-    arima_rmse[selected_months[month_idx]] <- as.numeric(rmse_month)
-    plot(q2data$YEAR, original_data, type = "l",
-         main = paste("Original and Forecasted Rainfall for", selected_months[month_idx]),
-         xlab = "Year", ylab = "Rainfall")
-    
-    lines(combined_forecasts[[month_idx]]$Year, forecast_data, col = "red")
-    
-    rmse_text <- paste("RMSE: ", round(rmse_month, 2))
-    text(x = 1965, y =max(original_data) - 10, pos = 4, labels = rmse_text)
-    print(paste("The RMSE for the month", selected_months[month_idx], arima_rmse[selected_months[month_idx]]))
-  }
-  print("The ARIMA coefficients are: ", arima_order)
+  u_stat_train <- sqrt(sum(u1[1:90])/sum(u2[1:90]))
+  u_stat_test <- sqrt(sum(u1[91:111])/sum(u2[91:111]))
+  return(list(forecasts=forecasts, alpha=alpha, ustat_train=u_stat_train, ustat_test = u_stat_test, level=a, trend=m))
 }
 
-# function declaration for Exponential Smoothing
-ets_forecasting <- function(){
-  
-  ets_rmse <- list()
-  for (month_idx in seq_along(selected_months)) {
-    ets_model <- ets(data[, selected_months[month_idx]], model = "AAN")
-    ets_forecasts[[month_idx]] <- forecast(ets_model, h = nrow(q2data) - nrow(data))
-  }
 
-  par(mfrow = c(2, 2))
-  for (month_idx in seq_along(selected_months)) {
+holt_method<- function(data, alpha, beta){
+  u1 <- numeric(length(data))
+  u2 <- numeric(length(data))
+  forecasts <- numeric(length(data))
+  l <- numeric(length(data))
+  b <- numeric(length(data))
+  l[1] <- data[1]
+  b[1] <- data[2] - data[1]
+  
+  for (timestep in 2:length(data)){
+    l[timestep] <- alpha*data[timestep] + (1 - alpha)*(l[timestep-1] + b[timestep-1])
+    b[timestep] <- beta*(l[timestep] - l[timestep-1]) + (1 - beta)*(b[timestep-1])
+    forecasts[timestep] <- l[timestep-1] + b[timestep-1]
+    u1[timestep] <- ((forecasts[timestep] - data[timestep])/data[timestep-1])^2
+    u2[timestep] <- ((data[timestep] - data[timestep-1])/data[timestep-1])^2
+  }
+  forecasts[length(data) + 1] <- l[length(data)] + b[length(data)]
+  u_stat_train <- sqrt(sum(u1[1:90])/sum(u2[1:90]))
+  u_stat_test <- sqrt(sum(u1[91:111])/sum(u2[91:111]))
+  return(list(l=l, b=b, ustat_train=u_stat_train, ustat_test = u_stat_test, forecasts=forecasts))
+}
+
+hlforecast <- function(){
+  par(mfrow=c(2,2))
+  for(month_idx in seq_along(selected_months)){
+    
     original_data <- q2data[, selected_months[month_idx]]
-    forecast_data <- ets_forecasts[[month_idx]]$mean + rnorm(n = length(ets_forecasts[[month_idx]]$mean), mean=0, sd = 5.5)
-    diff <- (q2data[91:111, selected_months[month_idx]] - forecast_data)^2
-    rmse_month <- sqrt(mean(diff, na.rm = TRUE))
-    ets_rmse[selected_months[month_idx]] <- as.numeric(rmse_month)
-    ets_coeff <- coefficients(ets_model)
-
-    plot(q2data$YEAR, original_data, type = "l",
+    results <- holt_method(original_data, alpha = 0.5, beta = 0.35)
+    plot(q2data$YEAR, original_data, 
+         type = "l",  
          main = paste("Original and Forecasted Rainfall for", selected_months[month_idx]),
-         xlab = "Year", ylab = "Rainfall")
-
-    lines(seq(1991, 2011),forecast_data, col = "red")
-    
-    rmse_text <- paste("RMSE:", round(rmse_month, 2))
-    text(x = 1965, y = max(original_data)-10, pos = 4, labels = rmse_text)
-    print(paste("The RMSE for the month", selected_months[month_idx], ets_rmse[selected_months[month_idx]]))
+         xlab = "Year", ylab = "Rainfall",
+         ylim = c(min(c(original_data, results$forecasts)), 
+                  max(c(original_data, results$forecasts))))
+    rmse <- rmse(results$forecasts[91:length(original_data)], original_data[91:length(original_data)])
+    rmse_text <- paste("RMSE:", round(rmse, 2))
+    text(x = 1965, y = max(original_data)-2, pos = 4, labels = rmse_text)
+    print(paste("The RMSE for the month", selected_months[month_idx], rmse))
+    print(paste("The U train Statistic for the month", selected_months[month_idx], results$ustat_train))
+    print(paste("The U test Statistic for the month", selected_months[month_idx], results$ustat_test))
+    lines(q2data$YEAR[91:length(original_data)], results$forecasts[91:length(original_data)], col = "red")
   }
-  print(paste("The ETS coefficients are: ", ets_coeff))
 }
 
-# ets_forecasting()
-arima_forecasting()
+adaptiveets_forecast <- function(){
+  
+  par(mfrow=c(2,2))
+  for(month_idx in seq_along(selected_months)){
+    original_data <- q2data[, selected_months[month_idx]]
+    results <- adaptive_ets(original_data, initial_alpha = 0.3, beta = 0.01)
+    plot(q2data$YEAR, original_data, 
+         type = "l",  
+         main = paste("Original and Forecasted Rainfall for", selected_months[month_idx]),
+         xlab = "Year", ylab = "Rainfall",
+         ylim = c(min(c(original_data, results$forecasts)), 
+                  max(c(original_data, results$forecasts))))
+    rmse <- rmse(results$forecasts[91:length(original_data)], original_data[91:length(original_data)])
+    rmse_text <- paste("RMSE:", round(rmse, 2))
+    text(x = 1965, y = max(original_data)-2, pos = 4, labels = rmse_text)
+    print(paste("The RMSE for the month", selected_months[month_idx], rmse))
+    print(paste("The U train Statistic for the month", selected_months[month_idx], results$ustat_train))
+    print(paste("The U test Statistic for the month", selected_months[month_idx], results$ustat_test))
+    lines(q2data$YEAR[91:length(original_data)], results$forecasts[91:length(original_data)], col = "red")
+  }
+  
+}
+
+
+# hlforecast()
+adaptiveets_forecast()
 

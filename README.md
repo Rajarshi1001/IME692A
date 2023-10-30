@@ -7,3 +7,8 @@ Assignments for the course IME692A
 __ETS__ etc.
 - The solution to the first part is mentioned in the excel file `Question1.xlsx`
 - The solution to the second part is given in the two R scripts which implements the __Holt's `linear method__ and the __adaptive exponential smoothing method__ for two different sets of data and calculates the __u-statistic__ for each set. 
+
+## Assignment 2
+
+- Multiple Linear Regression and estimators evaluation
+- Calculating probability distribution and CDF for minimum of a set of Random Variables for the case of **Chi-Square** and **Student-t** distributions. 

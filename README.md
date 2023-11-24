@@ -10,5 +10,13 @@ __ETS__ etc.
 
 ## Assignment 2
 
-- Multiple Linear Regression and estimators evaluation
-- Calculating probability distribution and CDF for minimum of a set of Random Variables for the case of **Chi-Square** and **Student-t** distributions. 
+- Multiple Linear Regression and estimators evaluation. The code is present in the R scripts in the folder along with the plots.
+- Calculating probability distribution and CDF for minimum and maximum ($f(X_{max})$, $f(X_{min})$, $F(X_{max})$ and $F(X_{min})$) of a set of Random Variables for the case of **Chi-Square** and **Student-t** distributions. 
+
+## Midsem Scripts
+
+This folder contains the excel files and notebooks for the midsem examination
+
+## Endsem Scripts
+
+This folder contains the excel files and notebooks for the endsem examination
